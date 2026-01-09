@@ -16,6 +16,10 @@ local SHOW_DISTANCE = false
 local SHOW_HEALTH = false
 local MAX_DISTANCE = 150
 
+-- Hub toggle keybind (customizable)
+local HUB_TOGGLE_KEY = Enum.KeyCode.RightControl
+local awaitingHubKey = false
+
 local FONT = Enum.Font.GothamBold
 local TWEEN_TIME = 0.10
 local TWEEN_COOLDOWN = 0.12
@@ -90,7 +94,7 @@ overlay.ZIndex = 1
 overlay.Parent = hubGui
 
 ---------------------------------------------------
--- HUB WINDOW (SHARP ORANGE BORDER)
+-- HUB WINDOW (sharp orange border)
 ---------------------------------------------------
 local OUTLINE_THICKNESS = 2
 local CORNER_RADIUS = 14
@@ -100,16 +104,14 @@ outer.Name = "HubOuter"
 outer.Size = UDim2.fromOffset(680, 400)
 outer.Position = UDim2.fromScale(0.5, 0.5)
 outer.AnchorPoint = Vector2.new(0.5, 0.5)
-outer.BackgroundColor3 = THEME.outline -- orange border
+outer.BackgroundColor3 = THEME.outline
 outer.BorderSizePixel = 0
 outer.Visible = true
 outer.ZIndex = 1000
 outer.ClipsDescendants = true
 outer.Parent = hubGui
+-- no UICorner => sharp orange corners
 
--- ✅ IMPORTANT: no UICorner on outer => sharp orange corners
-
--- Inner content
 local window = Instance.new("Frame")
 window.Name = "HubWindow"
 window.Position = UDim2.fromOffset(OUTLINE_THICKNESS, OUTLINE_THICKNESS)
@@ -132,7 +134,15 @@ topBar.BorderSizePixel = 0
 topBar.ZIndex = 1002
 topBar.Parent = window
 
--- Title: DDT orange, HUB white, v1.0 orange
+-- ✅ thin divider under title (same style as other dividers)
+local topDivider = Instance.new("Frame")
+topDivider.Size = UDim2.new(1, 0, 0, 1)
+topDivider.Position = UDim2.new(0, 0, 1, -1)
+topDivider.BackgroundColor3 = THEME.border
+topDivider.BorderSizePixel = 0
+topDivider.ZIndex = 1003
+topDivider.Parent = topBar
+
 local topTitle = Instance.new("TextLabel")
 topTitle.BackgroundTransparency = 1
 topTitle.Size = UDim2.new(1, 0, 1, 0)
@@ -188,10 +198,8 @@ do
 		if dragging and input.UserInputType == Enum.UserInputType.MouseMovement then
 			local delta = input.Position - dragStart
 			outer.Position = UDim2.new(
-				startPos.X.Scale,
-				startPos.X.Offset + delta.X,
-				startPos.Y.Scale,
-				startPos.Y.Offset + delta.Y
+				startPos.X.Scale, startPos.X.Offset + delta.X,
+				startPos.Y.Scale, startPos.Y.Offset + delta.Y
 			)
 		end
 	end)
@@ -204,7 +212,7 @@ do
 end
 
 ---------------------------------------------------
--- SIDEBAR TAB BUTTONS (with emojis)
+-- SIDEBAR TAB BUTTONS
 ---------------------------------------------------
 local function makeSideButton(text, y)
 	local btn = Instance.new("TextButton")
@@ -234,6 +242,7 @@ end
 
 local visualsTabBtn = makeSideButton("🤖 VISUALS", 12)
 local settingsTabBtn = makeSideButton("⚙ SETTINGS", 62)
+local observeTabBtn = makeSideButton("👀 OBSERVE", 112) -- ✅ new tab
 
 -- Scrollable pages
 local function makeScrollPage(parent)
@@ -265,19 +274,27 @@ end
 
 local visualsPage = makeScrollPage(content)
 local settingsPage = makeScrollPage(content)
+local observePage = makeScrollPage(content) -- ✅ new page
 settingsPage.Visible = false
+observePage.Visible = false
 
 local function setActiveTab(tab)
 	local isVisuals = (tab == "VISUALS")
+	local isSettings = (tab == "SETTINGS")
+	local isObserve = (tab == "OBSERVE")
+
 	visualsPage.Visible = isVisuals
-	settingsPage.Visible = not isVisuals
+	settingsPage.Visible = isSettings
+	observePage.Visible = isObserve
 
 	visualsTabBtn.BackgroundColor3 = isVisuals and THEME.row2 or THEME.row
-	settingsTabBtn.BackgroundColor3 = (not isVisuals) and THEME.row2 or THEME.row
+	settingsTabBtn.BackgroundColor3 = isSettings and THEME.row2 or THEME.row
+	observeTabBtn.BackgroundColor3 = isObserve and THEME.row2 or THEME.row
 end
 
 visualsTabBtn.MouseButton1Click:Connect(function() setActiveTab("VISUALS") end)
 settingsTabBtn.MouseButton1Click:Connect(function() setActiveTab("SETTINGS") end)
+observeTabBtn.MouseButton1Click:Connect(function() setActiveTab("OBSERVE") end)
 setActiveTab("VISUALS")
 
 ---------------------------------------------------
@@ -301,6 +318,7 @@ local function makeRow(parent, labelText)
 	s.Parent = row
 
 	local label = Instance.new("TextLabel")
+	label.Name = "LeftLabel"
 	label.BackgroundTransparency = 1
 	label.Position = UDim2.new(0, 14, 0, 0)
 	label.Size = UDim2.new(1, -(120 + 24), 1, 0)
@@ -312,7 +330,7 @@ local function makeRow(parent, labelText)
 	label.Text = labelText
 	label.Parent = row
 
-	return row
+	return row, label
 end
 
 local function makeToggle(parentRow, defaultOn)
@@ -401,9 +419,6 @@ end
 local rowESP = makeRow(visualsPage, "ESP")
 local espToggle, paintEsp = makeToggle(rowESP, false)
 
-local rowBox = makeRow(visualsPage, "BOX (SOON)")
-local boxToggle, paintBox = makeToggle(rowBox, false)
-
 local rowRange = makeRow(visualsPage, "RANGE")
 local rangeBox = makeInput(rowRange, tostring(MAX_DISTANCE))
 
@@ -417,23 +432,95 @@ local rowHealth = makeRow(visualsPage, "HEALTH")
 local healthToggle, paintHealth = makeToggle(rowHealth, false)
 
 ---------------------------------------------------
--- SETTINGS TAB: Performance HZ control
+-- SETTINGS TAB: PERF HZ + HUB KEYBIND (fixed layout)
 ---------------------------------------------------
 local perfRow = makeRow(settingsPage, "PERF HZ")
 local perfHzBox = makeInput(perfRow, tostring(UPDATE_HZ))
 
--- Add an APPLY button below for clarity
 local perfApplyRow = makeRow(settingsPage, "APPLY HZ")
 local perfApplyBtn = makeButton(perfApplyRow, "APPLY")
 
+-- ✅ FIX: Hub key row uses a left label + a separate value label (no overlap)
+local hubKeyRow, hubKeyLeftLabel = makeRow(settingsPage, "HUB KEY")
+
+local hubKeyValue = Instance.new("TextLabel")
+hubKeyValue.BackgroundTransparency = 1
+hubKeyValue.Position = UDim2.new(0, 110, 0, 0) -- to the right of "HUB KEY"
+hubKeyValue.Size = UDim2.new(1, -(120 + 14 + 110), 1, 0)
+hubKeyValue.Font = FONT
+hubKeyValue.TextSize = 14
+hubKeyValue.TextColor3 = THEME.subtext
+hubKeyValue.TextStrokeTransparency = 1
+hubKeyValue.TextXAlignment = Enum.TextXAlignment.Left
+hubKeyValue.Text = ("CURRENT: " .. HUB_TOGGLE_KEY.Name)
+hubKeyValue.Parent = hubKeyRow
+
+local hubKeyBtn = makeButton(hubKeyRow, "CHANGE")
+
+-- OBSERVE page placeholder (empty on purpose)
+local observePlaceholder = Instance.new("TextLabel")
+observePlaceholder.BackgroundTransparency = 1
+observePlaceholder.Size = UDim2.new(1, 0, 0, 22)
+observePlaceholder.Font = FONT
+observePlaceholder.TextSize = 14
+observePlaceholder.TextStrokeTransparency = 1
+observePlaceholder.TextColor3 = THEME.subtext
+observePlaceholder.TextXAlignment = Enum.TextXAlignment.Left
+observePlaceholder.Text = "COMING SOON..."
+observePlaceholder.Parent = observePage
+
 ---------------------------------------------------
--- RightControl toggles hub visibility
+-- APPLY HZ (runtime)
+---------------------------------------------------
+local accum = 0
+local interval = 1 / UPDATE_HZ
+
+local function applyPerfHz()
+	local val = tonumber(perfHzBox.Text)
+	if not val then
+		perfHzBox.Text = tostring(UPDATE_HZ)
+		return
+	end
+	val = math.clamp(math.floor(val + 0.5), 5, 120)
+	UPDATE_HZ = val
+	interval = 1 / UPDATE_HZ
+	accum = 0
+	perfHzBox.Text = tostring(UPDATE_HZ)
+end
+
+perfApplyBtn.MouseButton1Click:Connect(applyPerfHz)
+perfHzBox.FocusLost:Connect(function(enterPressed)
+	if enterPressed then applyPerfHz() end
+end)
+
+---------------------------------------------------
+-- HUB KEYBIND CHANGE
+---------------------------------------------------
+hubKeyBtn.MouseButton1Click:Connect(function()
+	awaitingHubKey = true
+	hubKeyBtn.Text = "PRESS KEY..."
+end)
+
+---------------------------------------------------
+-- Hub toggles & keybind capture
 ---------------------------------------------------
 UserInputService.InputBegan:Connect(function(input, gpe)
-	if gpe then return end
-	if input.KeyCode == Enum.KeyCode.RightControl then
-		outer.Visible = not outer.Visible
+	-- capture new hub key
+	if awaitingHubKey and input.UserInputType == Enum.UserInputType.Keyboard then
+		HUB_TOGGLE_KEY = input.KeyCode
+		hubKeyValue.Text = ("CURRENT: " .. HUB_TOGGLE_KEY.Name)
+		awaitingHubKey = false
+		hubKeyBtn.Text = "CHANGE"
+		return
 	end
+
+	-- toggle hub even if UI consumes input
+	if input.UserInputType == Enum.UserInputType.Keyboard and input.KeyCode == HUB_TOGGLE_KEY then
+		outer.Visible = not outer.Visible
+		return
+	end
+
+	if gpe then return end
 end)
 
 ---------------------------------------------------
@@ -459,11 +546,6 @@ end
 espToggle.MouseButton1Click:Connect(function()
 	ESP_ENABLED = not ESP_ENABLED
 	paintEsp(ESP_ENABLED)
-end)
-
-boxToggle.MouseButton1Click:Connect(function()
-	local on = (boxToggle.Text ~= "ON")
-	paintBox(on)
 end)
 
 distToggle.MouseButton1Click:Connect(function()
@@ -495,33 +577,6 @@ rangeBox.FocusLost:Connect(function()
 end)
 
 ---------------------------------------------------
--- PERF HZ APPLY (runtime)
----------------------------------------------------
-local accum = 0
-local interval = 1 / UPDATE_HZ
-
-local function applyPerfHz()
-	local val = tonumber(perfHzBox.Text)
-	if not val then
-		perfHzBox.Text = tostring(UPDATE_HZ)
-		return
-	end
-	val = math.clamp(math.floor(val + 0.5), 5, 120)
-	UPDATE_HZ = val
-	interval = 1 / UPDATE_HZ
-	accum = 0
-	perfHzBox.Text = tostring(UPDATE_HZ)
-end
-
-perfApplyBtn.MouseButton1Click:Connect(applyPerfHz)
-perfHzBox.FocusLost:Connect(function(enterPressed)
-	-- optional: apply on enter
-	if enterPressed then
-		applyPerfHz()
-	end
-end)
-
----------------------------------------------------
 -- ESP CORE (unchanged)
 ---------------------------------------------------
 local function destroyInstance(x)
@@ -533,13 +588,11 @@ end
 local function cleanupESP(player)
 	local d = ESP[player]
 	if not d then return end
-
 	if d.connections then
 		for _, c in ipairs(d.connections) do
 			pcall(function() c:Disconnect() end)
 		end
 	end
-
 	destroyInstance(d.highlight)
 	destroyInstance(d.frame)
 	ESP[player] = nil
@@ -687,7 +740,6 @@ local function createESPForPlayer(player, character)
 		humanoid = humanoid,
 		root = root,
 		highlight = highlight,
-
 		frame = frame,
 		nameRow = nameRow,
 		nameText = nameText,
@@ -696,7 +748,6 @@ local function createESPForPlayer(player, character)
 		hpText = hpText,
 		distRow = distRow,
 		distText = distText,
-
 		lastHp = math.floor(humanoid.Health),
 		lastScale = -1,
 		lastTweenTime = 0,
@@ -706,19 +757,17 @@ local function createESPForPlayer(player, character)
 	table.insert(ESP[player].connections, humanoid.Died:Connect(function()
 		cleanupESP(player)
 	end))
-
 	table.insert(ESP[player].connections, character.AncestryChanged:Connect(function(_, parent)
-		if parent == nil then
-			cleanupESP(player)
-		end
+		if parent == nil then cleanupESP(player) end
 	end))
 end
 
--- Throttled update loop (interval updates dynamically from settings)
+-- Throttled update loop
+local accum2 = 0
 RunService.Heartbeat:Connect(function(dt)
-	accum += dt
-	if accum < interval then return end
-	accum -= interval
+	accum2 += dt
+	if accum2 < interval then return end
+	accum2 -= interval
 
 	local localChar = LocalPlayer.Character
 	local localRoot = localChar and localChar:FindFirstChild("HumanoidRootPart")
@@ -735,13 +784,11 @@ RunService.Heartbeat:Connect(function(dt)
 			d.frame.Visible = visible
 
 			if visible then
-				local worldPos = d.root.Position + Vector3.new(0, 4.0, 0)
-				local v, onScreen = Camera:WorldToViewportPoint(worldPos)
+				local v, onScreen = Camera:WorldToViewportPoint(d.root.Position + Vector3.new(0, 4.0, 0))
 				if not onScreen then
 					d.frame.Visible = false
 				else
-					local scale = 1 - (dist / SCALE_DISTANCE)
-					scale = math.clamp(scale, MIN_SCALE, MAX_SCALE)
+					local scale = math.clamp(1 - (dist / SCALE_DISTANCE), MIN_SCALE, MAX_SCALE)
 
 					if d.lastScale < 0 or math.abs(scale - d.lastScale) >= SCALE_EPS then
 						d.lastScale = scale
@@ -750,8 +797,8 @@ RunService.Heartbeat:Connect(function(dt)
 						local nameH = SHOW_NAMES and math.floor(NAME_HEIGHT * scale) or 0
 						local barH  = SHOW_HEALTH and math.floor(BAR_HEIGHT * scale) or 0
 						local distH = SHOW_DISTANCE and math.floor(DIST_HEIGHT * scale) or 0
-
 						local totalH = nameH + (nameH > 0 and PADDING_Y or 0) + barH + (distH > 0 and PADDING_Y or 0) + distH
+
 						d.frame.Size = UDim2.fromOffset(width, totalH)
 
 						d.nameRow.Size = SHOW_NAMES and UDim2.new(1, 0, 0, nameH) or UDim2.new(1, 0, 0, 0)
@@ -762,10 +809,6 @@ RunService.Heartbeat:Connect(function(dt)
 
 						d.distRow.Size = SHOW_DISTANCE and UDim2.new(1, 0, 0, distH) or UDim2.new(1, 0, 0, 0)
 						d.distText.Visible = SHOW_DISTANCE
-
-						d.nameText.TextSize = math.max(10, math.floor(16 * scale))
-						d.hpText.TextSize   = math.max(9,  math.floor(14 * scale))
-						d.distText.TextSize = math.max(9,  math.floor(14 * scale))
 					end
 
 					d.frame.Position = UDim2.fromOffset(v.X, v.Y)
@@ -805,33 +848,11 @@ end)
 -- Player handling
 local function hookPlayer(player)
 	if player == LocalPlayer then return end
-
-	player.CharacterAdded:Connect(function(char)
-		createESPForPlayer(player, char)
-	end)
-
-	player.CharacterRemoving:Connect(function()
-		cleanupESP(player)
-	end)
-
-	if player.Character then
-		createESPForPlayer(player, player.Character)
-	end
+	player.CharacterAdded:Connect(function(char) createESPForPlayer(player, char) end)
+	player.CharacterRemoving:Connect(function() cleanupESP(player) end)
+	if player.Character then createESPForPlayer(player, player.Character) end
 end
 
 Players.PlayerAdded:Connect(hookPlayer)
-Players.PlayerRemoving:Connect(function(player)
-	cleanupESP(player)
-end)
-
-for _, p in ipairs(Players:GetPlayers()) do
-	hookPlayer(p)
-end
-
--- RightControl toggles hub visibility
-UserInputService.InputBegan:Connect(function(input, gpe)
-	if gpe then return end
-	if input.KeyCode == Enum.KeyCode.RightControl then
-		outer.Visible = not outer.Visible
-	end
-end)
+Players.PlayerRemoving:Connect(function(player) cleanupESP(player) end)
+for _, p in ipairs(Players:GetPlayers()) do hookPlayer(p) end
