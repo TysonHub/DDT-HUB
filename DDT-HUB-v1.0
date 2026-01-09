@@ -1,0 +1,837 @@
+-- SERVICES
+local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
+local TweenService = game:GetService("TweenService")
+local UserInputService = game:GetService("UserInputService")
+
+local LocalPlayer = Players.LocalPlayer
+local Camera = workspace.CurrentCamera
+
+---------------------------------------------------
+-- DEFAULTS (ALL OFF ON START)
+---------------------------------------------------
+local ESP_ENABLED = false
+local SHOW_NAMES = false
+local SHOW_DISTANCE = false
+local SHOW_HEALTH = false
+local MAX_DISTANCE = 150
+
+local FONT = Enum.Font.GothamBold
+local TWEEN_TIME = 0.10
+local TWEEN_COOLDOWN = 0.12
+
+-- ESP overlay sizing
+local BASE_WIDTH = 190
+local BAR_HEIGHT = 14
+local NAME_HEIGHT = 20
+local DIST_HEIGHT = 18
+local PADDING_Y = 2
+
+-- Bar style
+local BAR_BG_COLOR = Color3.fromRGB(55, 55, 55)
+local BAR_BORDER_COLOR = Color3.fromRGB(0, 0, 0)
+local BAR_BORDER_THICKNESS = 1
+
+-- Distance scaling
+local SCALE_DISTANCE = 300
+local MIN_SCALE = 0.60
+local MAX_SCALE = 1.00
+
+-- Performance tuning (runtime adjustable)
+local UPDATE_HZ = 30
+local SCALE_EPS = 0.03
+
+---------------------------------------------------
+-- THEME
+---------------------------------------------------
+local THEME = {
+	window = Color3.fromRGB(22, 24, 28),
+	topbar = Color3.fromRGB(28, 31, 36),
+	sidebar = Color3.fromRGB(18, 19, 22),
+	content = Color3.fromRGB(24, 26, 30),
+
+	row = Color3.fromRGB(30, 33, 39),
+	row2 = Color3.fromRGB(34, 38, 45),
+	input = Color3.fromRGB(18, 19, 22),
+
+	text = Color3.fromRGB(235, 238, 245),
+	subtext = Color3.fromRGB(180, 185, 195),
+	textDark = Color3.fromRGB(10, 10, 12),
+
+	border = Color3.fromRGB(55, 60, 70),
+	borderSoft = Color3.fromRGB(40, 44, 52),
+
+	accent = Color3.fromRGB(120, 200, 110),  -- subtle green
+	outline = Color3.fromRGB(255, 140, 0),   -- orange
+	danger = Color3.fromRGB(160, 60, 60),    -- muted red
+}
+
+---------------------------------------------------
+-- STORAGE
+---------------------------------------------------
+local ESP = {}
+
+---------------------------------------------------
+-- MAIN GUI
+---------------------------------------------------
+local hubGui = Instance.new("ScreenGui")
+hubGui.Name = "DDTHub"
+hubGui.ResetOnSpawn = false
+hubGui.IgnoreGuiInset = true
+hubGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+hubGui.Parent = LocalPlayer:WaitForChild("PlayerGui")
+
+-- Fullscreen overlay container for ESP elements
+local overlay = Instance.new("Frame")
+overlay.Name = "ESPOverlay"
+overlay.Size = UDim2.fromScale(1, 1)
+overlay.BackgroundTransparency = 1
+overlay.ZIndex = 1
+overlay.Parent = hubGui
+
+---------------------------------------------------
+-- HUB WINDOW (SHARP ORANGE BORDER)
+---------------------------------------------------
+local OUTLINE_THICKNESS = 2
+local CORNER_RADIUS = 14
+
+local outer = Instance.new("Frame")
+outer.Name = "HubOuter"
+outer.Size = UDim2.fromOffset(680, 400)
+outer.Position = UDim2.fromScale(0.5, 0.5)
+outer.AnchorPoint = Vector2.new(0.5, 0.5)
+outer.BackgroundColor3 = THEME.outline -- orange border
+outer.BorderSizePixel = 0
+outer.Visible = true
+outer.ZIndex = 1000
+outer.ClipsDescendants = true
+outer.Parent = hubGui
+
+-- ✅ IMPORTANT: no UICorner on outer => sharp orange corners
+
+-- Inner content
+local window = Instance.new("Frame")
+window.Name = "HubWindow"
+window.Position = UDim2.fromOffset(OUTLINE_THICKNESS, OUTLINE_THICKNESS)
+window.Size = UDim2.new(1, -OUTLINE_THICKNESS * 2, 1, -OUTLINE_THICKNESS * 2)
+window.BackgroundColor3 = THEME.window
+window.BorderSizePixel = 0
+window.ZIndex = 1001
+window.ClipsDescendants = true
+window.Parent = outer
+
+local winCorner = Instance.new("UICorner")
+winCorner.CornerRadius = UDim.new(0, CORNER_RADIUS)
+winCorner.Parent = window
+
+-- Top bar
+local topBar = Instance.new("Frame")
+topBar.Size = UDim2.new(1, 0, 0, 52)
+topBar.BackgroundColor3 = THEME.topbar
+topBar.BorderSizePixel = 0
+topBar.ZIndex = 1002
+topBar.Parent = window
+
+-- Title: DDT orange, HUB white, v1.0 orange
+local topTitle = Instance.new("TextLabel")
+topTitle.BackgroundTransparency = 1
+topTitle.Size = UDim2.new(1, 0, 1, 0)
+topTitle.Font = FONT
+topTitle.TextSize = 20
+topTitle.RichText = true
+topTitle.TextStrokeTransparency = 1
+topTitle.Text = '<font color="rgb(255,140,0)">DDT</font> <font color="rgb(235,238,245)">HUB</font> <font color="rgb(255,140,0)">v1.0</font>'
+topTitle.TextColor3 = THEME.text
+topTitle.ZIndex = 1003
+topTitle.Parent = topBar
+
+-- Sidebar + content
+local sidebar = Instance.new("Frame")
+sidebar.Size = UDim2.new(0, 140, 1, -52)
+sidebar.Position = UDim2.new(0, 0, 0, 52)
+sidebar.BackgroundColor3 = THEME.sidebar
+sidebar.BorderSizePixel = 0
+sidebar.ZIndex = 1002
+sidebar.Parent = window
+
+local content = Instance.new("Frame")
+content.Size = UDim2.new(1, -140, 1, -52)
+content.Position = UDim2.new(0, 140, 0, 52)
+content.BackgroundColor3 = THEME.content
+content.BorderSizePixel = 0
+content.ZIndex = 1002
+content.ClipsDescendants = true
+content.Parent = window
+
+local divider = Instance.new("Frame")
+divider.Size = UDim2.new(0, 1, 1, -52)
+divider.Position = UDim2.new(0, 140, 0, 52)
+divider.BackgroundColor3 = THEME.border
+divider.BorderSizePixel = 0
+divider.ZIndex = 1003
+divider.Parent = window
+
+-- Dragging by top bar (move outer frame)
+do
+	local dragging = false
+	local dragStart, startPos
+
+	topBar.InputBegan:Connect(function(input)
+		if input.UserInputType == Enum.UserInputType.MouseButton1 then
+			dragging = true
+			dragStart = input.Position
+			startPos = outer.Position
+		end
+	end)
+
+	UserInputService.InputChanged:Connect(function(input)
+		if dragging and input.UserInputType == Enum.UserInputType.MouseMovement then
+			local delta = input.Position - dragStart
+			outer.Position = UDim2.new(
+				startPos.X.Scale,
+				startPos.X.Offset + delta.X,
+				startPos.Y.Scale,
+				startPos.Y.Offset + delta.Y
+			)
+		end
+	end)
+
+	UserInputService.InputEnded:Connect(function(input)
+		if input.UserInputType == Enum.UserInputType.MouseButton1 then
+			dragging = false
+		end
+	end)
+end
+
+---------------------------------------------------
+-- SIDEBAR TAB BUTTONS (with emojis)
+---------------------------------------------------
+local function makeSideButton(text, y)
+	local btn = Instance.new("TextButton")
+	btn.Size = UDim2.new(1, -16, 0, 44)
+	btn.Position = UDim2.new(0, 8, 0, y)
+	btn.BackgroundColor3 = THEME.row
+	btn.BorderSizePixel = 0
+	btn.Text = text
+	btn.Font = FONT
+	btn.TextSize = 16
+	btn.TextColor3 = THEME.text
+	btn.TextStrokeTransparency = 1
+	btn.ZIndex = 1004
+	btn.Parent = sidebar
+
+	local c = Instance.new("UICorner")
+	c.CornerRadius = UDim.new(0, 10)
+	c.Parent = btn
+
+	local s = Instance.new("UIStroke")
+	s.Thickness = 1
+	s.Color = THEME.borderSoft
+	s.Parent = btn
+
+	return btn
+end
+
+local visualsTabBtn = makeSideButton("🤖 VISUALS", 12)
+local settingsTabBtn = makeSideButton("⚙ SETTINGS", 62)
+
+-- Scrollable pages
+local function makeScrollPage(parent)
+	local sc = Instance.new("ScrollingFrame")
+	sc.Size = UDim2.fromScale(1, 1)
+	sc.BackgroundTransparency = 1
+	sc.BorderSizePixel = 0
+	sc.ScrollBarThickness = 6
+	sc.ScrollBarImageColor3 = THEME.border
+	sc.CanvasSize = UDim2.fromScale(0, 0)
+	sc.AutomaticCanvasSize = Enum.AutomaticSize.Y
+	sc.ZIndex = 1003
+	sc.Parent = parent
+
+	local pad = Instance.new("UIPadding")
+	pad.PaddingLeft = UDim.new(0, 16)
+	pad.PaddingRight = UDim.new(0, 16)
+	pad.PaddingTop = UDim.new(0, 14)
+	pad.PaddingBottom = UDim.new(0, 14)
+	pad.Parent = sc
+
+	local layout = Instance.new("UIListLayout")
+	layout.SortOrder = Enum.SortOrder.LayoutOrder
+	layout.Padding = UDim.new(0, 10)
+	layout.Parent = sc
+
+	return sc
+end
+
+local visualsPage = makeScrollPage(content)
+local settingsPage = makeScrollPage(content)
+settingsPage.Visible = false
+
+local function setActiveTab(tab)
+	local isVisuals = (tab == "VISUALS")
+	visualsPage.Visible = isVisuals
+	settingsPage.Visible = not isVisuals
+
+	visualsTabBtn.BackgroundColor3 = isVisuals and THEME.row2 or THEME.row
+	settingsTabBtn.BackgroundColor3 = (not isVisuals) and THEME.row2 or THEME.row
+end
+
+visualsTabBtn.MouseButton1Click:Connect(function() setActiveTab("VISUALS") end)
+settingsTabBtn.MouseButton1Click:Connect(function() setActiveTab("SETTINGS") end)
+setActiveTab("VISUALS")
+
+---------------------------------------------------
+-- UI helpers
+---------------------------------------------------
+local function makeRow(parent, labelText)
+	local row = Instance.new("Frame")
+	row.LayoutOrder = 1
+	row.Size = UDim2.new(1, 0, 0, 44)
+	row.BackgroundColor3 = THEME.row
+	row.BorderSizePixel = 0
+	row.Parent = parent
+
+	local c = Instance.new("UICorner")
+	c.CornerRadius = UDim.new(0, 10)
+	c.Parent = row
+
+	local s = Instance.new("UIStroke")
+	s.Thickness = 1
+	s.Color = THEME.borderSoft
+	s.Parent = row
+
+	local label = Instance.new("TextLabel")
+	label.BackgroundTransparency = 1
+	label.Position = UDim2.new(0, 14, 0, 0)
+	label.Size = UDim2.new(1, -(120 + 24), 1, 0)
+	label.Font = FONT
+	label.TextSize = 16
+	label.TextColor3 = THEME.text
+	label.TextStrokeTransparency = 1
+	label.TextXAlignment = Enum.TextXAlignment.Left
+	label.Text = labelText
+	label.Parent = row
+
+	return row
+end
+
+local function makeToggle(parentRow, defaultOn)
+	local btn = Instance.new("TextButton")
+	btn.Size = UDim2.fromOffset(120, 30)
+	btn.Position = UDim2.new(1, -(120 + 14), 0.5, -15)
+	btn.BorderSizePixel = 0
+	btn.Font = FONT
+	btn.TextSize = 14
+	btn.TextStrokeTransparency = 1
+	btn.TextColor3 = Color3.new(1, 1, 1)
+	btn.Parent = parentRow
+
+	local c = Instance.new("UICorner")
+	c.CornerRadius = UDim.new(0, 10)
+	c.Parent = btn
+
+	local s = Instance.new("UIStroke")
+	s.Thickness = 1
+	s.Color = THEME.border
+	s.Parent = btn
+
+	local function paint(on)
+		btn.BackgroundColor3 = on and THEME.accent or THEME.danger
+		btn.Text = on and "ON" or "OFF"
+	end
+	paint(defaultOn)
+
+	return btn, paint
+end
+
+local function makeInput(parentRow, defaultText)
+	local box = Instance.new("TextBox")
+	box.Size = UDim2.fromOffset(120, 30)
+	box.Position = UDim2.new(1, -(120 + 14), 0.5, -15)
+	box.BackgroundColor3 = THEME.input
+	box.BorderSizePixel = 0
+	box.ClearTextOnFocus = false
+	box.Font = FONT
+	box.TextSize = 14
+	box.TextStrokeTransparency = 1
+	box.TextColor3 = THEME.text
+	box.Text = defaultText
+	box.Parent = parentRow
+
+	local c = Instance.new("UICorner")
+	c.CornerRadius = UDim.new(0, 10)
+	c.Parent = box
+
+	local s = Instance.new("UIStroke")
+	s.Thickness = 1
+	s.Color = THEME.border
+	s.Parent = box
+
+	return box
+end
+
+local function makeButton(parentRow, text)
+	local btn = Instance.new("TextButton")
+	btn.Size = UDim2.fromOffset(120, 30)
+	btn.Position = UDim2.new(1, -(120 + 14), 0.5, -15)
+	btn.BorderSizePixel = 0
+	btn.Font = FONT
+	btn.TextSize = 14
+	btn.TextStrokeTransparency = 1
+	btn.TextColor3 = Color3.new(1, 1, 1)
+	btn.BackgroundColor3 = THEME.row2
+	btn.Text = text
+	btn.Parent = parentRow
+
+	local c = Instance.new("UICorner")
+	c.CornerRadius = UDim.new(0, 10)
+	c.Parent = btn
+
+	local s = Instance.new("UIStroke")
+	s.Thickness = 1
+	s.Color = THEME.border
+	s.Parent = btn
+
+	return btn
+end
+
+---------------------------------------------------
+-- VISUALS TAB (ALL OFF)
+---------------------------------------------------
+local rowESP = makeRow(visualsPage, "ESP")
+local espToggle, paintEsp = makeToggle(rowESP, false)
+
+local rowBox = makeRow(visualsPage, "BOX (SOON)")
+local boxToggle, paintBox = makeToggle(rowBox, false)
+
+local rowRange = makeRow(visualsPage, "RANGE")
+local rangeBox = makeInput(rowRange, tostring(MAX_DISTANCE))
+
+local rowDist = makeRow(visualsPage, "DISTANCE")
+local distToggle, paintDist = makeToggle(rowDist, false)
+
+local rowNames = makeRow(visualsPage, "NAMES")
+local namesToggle, paintNames = makeToggle(rowNames, false)
+
+local rowHealth = makeRow(visualsPage, "HEALTH")
+local healthToggle, paintHealth = makeToggle(rowHealth, false)
+
+---------------------------------------------------
+-- SETTINGS TAB: Performance HZ control
+---------------------------------------------------
+local perfRow = makeRow(settingsPage, "PERF HZ")
+local perfHzBox = makeInput(perfRow, tostring(UPDATE_HZ))
+
+-- Add an APPLY button below for clarity
+local perfApplyRow = makeRow(settingsPage, "APPLY HZ")
+local perfApplyBtn = makeButton(perfApplyRow, "APPLY")
+
+---------------------------------------------------
+-- RightControl toggles hub visibility
+---------------------------------------------------
+UserInputService.InputBegan:Connect(function(input, gpe)
+	if gpe then return end
+	if input.KeyCode == Enum.KeyCode.RightControl then
+		outer.Visible = not outer.Visible
+	end
+end)
+
+---------------------------------------------------
+-- Wire hub controls to ESP state
+---------------------------------------------------
+local function applyRowTogglesToESP()
+	for _, d in pairs(ESP) do
+		if d.nameRow then
+			d.nameRow.Size = SHOW_NAMES and UDim2.new(1, 0, 0, NAME_HEIGHT) or UDim2.new(1, 0, 0, 0)
+			d.nameText.Visible = SHOW_NAMES
+		end
+		if d.distRow then
+			d.distRow.Size = SHOW_DISTANCE and UDim2.new(1, 0, 0, DIST_HEIGHT) or UDim2.new(1, 0, 0, 0)
+			d.distText.Visible = SHOW_DISTANCE
+		end
+		if d.barRow then
+			d.barRow.Visible = SHOW_HEALTH
+		end
+		if d.lastScale then d.lastScale = -1 end
+	end
+end
+
+espToggle.MouseButton1Click:Connect(function()
+	ESP_ENABLED = not ESP_ENABLED
+	paintEsp(ESP_ENABLED)
+end)
+
+boxToggle.MouseButton1Click:Connect(function()
+	local on = (boxToggle.Text ~= "ON")
+	paintBox(on)
+end)
+
+distToggle.MouseButton1Click:Connect(function()
+	SHOW_DISTANCE = not SHOW_DISTANCE
+	paintDist(SHOW_DISTANCE)
+	applyRowTogglesToESP()
+end)
+
+namesToggle.MouseButton1Click:Connect(function()
+	SHOW_NAMES = not SHOW_NAMES
+	paintNames(SHOW_NAMES)
+	applyRowTogglesToESP()
+end)
+
+healthToggle.MouseButton1Click:Connect(function()
+	SHOW_HEALTH = not SHOW_HEALTH
+	paintHealth(SHOW_HEALTH)
+	applyRowTogglesToESP()
+end)
+
+rangeBox.FocusLost:Connect(function()
+	local val = tonumber(rangeBox.Text)
+	if val then
+		MAX_DISTANCE = math.clamp(val, 10, 1000)
+		rangeBox.Text = tostring(MAX_DISTANCE)
+	else
+		rangeBox.Text = tostring(MAX_DISTANCE)
+	end
+end)
+
+---------------------------------------------------
+-- PERF HZ APPLY (runtime)
+---------------------------------------------------
+local accum = 0
+local interval = 1 / UPDATE_HZ
+
+local function applyPerfHz()
+	local val = tonumber(perfHzBox.Text)
+	if not val then
+		perfHzBox.Text = tostring(UPDATE_HZ)
+		return
+	end
+	val = math.clamp(math.floor(val + 0.5), 5, 120)
+	UPDATE_HZ = val
+	interval = 1 / UPDATE_HZ
+	accum = 0
+	perfHzBox.Text = tostring(UPDATE_HZ)
+end
+
+perfApplyBtn.MouseButton1Click:Connect(applyPerfHz)
+perfHzBox.FocusLost:Connect(function(enterPressed)
+	-- optional: apply on enter
+	if enterPressed then
+		applyPerfHz()
+	end
+end)
+
+---------------------------------------------------
+-- ESP CORE (unchanged)
+---------------------------------------------------
+local function destroyInstance(x)
+	if typeof(x) == "Instance" and x.Parent ~= nil then
+		x:Destroy()
+	end
+end
+
+local function cleanupESP(player)
+	local d = ESP[player]
+	if not d then return end
+
+	if d.connections then
+		for _, c in ipairs(d.connections) do
+			pcall(function() c:Disconnect() end)
+		end
+	end
+
+	destroyInstance(d.highlight)
+	destroyInstance(d.frame)
+	ESP[player] = nil
+end
+
+local function healthColor(pct)
+	pct = math.clamp(pct, 0, 1)
+	if pct >= 0.5 then
+		local t = (pct - 0.5) / 0.5
+		return Color3.fromRGB(
+			math.floor(255 * (1 - t)),
+			math.floor(200 + (55 * t)),
+			0
+		)
+	else
+		local t = pct / 0.5
+		return Color3.fromRGB(
+			255,
+			math.floor(60 + (140 * t)),
+			0
+		)
+	end
+end
+
+local function makeESPFrame()
+	local frame = Instance.new("Frame")
+	frame.BackgroundTransparency = 1
+	frame.AnchorPoint = Vector2.new(0.5, 1)
+	frame.Size = UDim2.fromOffset(BASE_WIDTH, NAME_HEIGHT + PADDING_Y + BAR_HEIGHT + PADDING_Y + DIST_HEIGHT)
+	frame.Visible = false
+	frame.ZIndex = 10
+	frame.Parent = overlay
+
+	local layout = Instance.new("UIListLayout")
+	layout.FillDirection = Enum.FillDirection.Vertical
+	layout.HorizontalAlignment = Enum.HorizontalAlignment.Center
+	layout.VerticalAlignment = Enum.VerticalAlignment.Top
+	layout.SortOrder = Enum.SortOrder.LayoutOrder
+	layout.Padding = UDim.new(0, PADDING_Y)
+	layout.Parent = frame
+
+	local nameRow = Instance.new("Frame")
+	nameRow.Name = "NameRow"
+	nameRow.BackgroundTransparency = 1
+	nameRow.LayoutOrder = 1
+	nameRow.Size = SHOW_NAMES and UDim2.new(1, 0, 0, NAME_HEIGHT) or UDim2.new(1, 0, 0, 0)
+	nameRow.Parent = frame
+
+	local nameText = Instance.new("TextLabel")
+	nameText.BackgroundTransparency = 1
+	nameText.Size = UDim2.fromScale(1, 1)
+	nameText.Font = FONT
+	nameText.TextSize = 16
+	nameText.TextColor3 = Color3.new(1, 1, 1)
+	nameText.TextStrokeTransparency = 0.25
+	nameText.Visible = SHOW_NAMES
+	nameText.ZIndex = 11
+	nameText.Parent = nameRow
+
+	local barRow = Instance.new("Frame")
+	barRow.Name = "BarRow"
+	barRow.BackgroundTransparency = 1
+	barRow.LayoutOrder = 2
+	barRow.Size = UDim2.new(1, 0, 0, BAR_HEIGHT)
+	barRow.Visible = SHOW_HEALTH
+	barRow.Parent = frame
+
+	local barBG = Instance.new("Frame")
+	barBG.Size = UDim2.fromScale(1, 1)
+	barBG.BackgroundColor3 = BAR_BG_COLOR
+	barBG.BorderSizePixel = 0
+	barBG.ZIndex = 11
+	barBG.Parent = barRow
+
+	local stroke = Instance.new("UIStroke")
+	stroke.Color = BAR_BORDER_COLOR
+	stroke.Thickness = BAR_BORDER_THICKNESS
+	stroke.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
+	stroke.Parent = barBG
+
+	local barFill = Instance.new("Frame")
+	barFill.Size = UDim2.fromScale(1, 1)
+	barFill.BackgroundColor3 = Color3.fromRGB(0, 255, 0)
+	barFill.BorderSizePixel = 0
+	barFill.ZIndex = 12
+	barFill.Parent = barBG
+
+	local hpText = Instance.new("TextLabel")
+	hpText.BackgroundTransparency = 1
+	hpText.Size = UDim2.fromScale(1, 1)
+	hpText.Font = FONT
+	hpText.TextSize = 14
+	hpText.TextColor3 = Color3.new(1, 1, 1)
+	hpText.TextStrokeTransparency = 0.25
+	hpText.ZIndex = 13
+	hpText.Parent = barBG
+
+	local pad = Instance.new("UIPadding")
+	pad.PaddingLeft = UDim.new(0, 4)
+	pad.PaddingRight = UDim.new(0, 4)
+	pad.Parent = hpText
+
+	local distRow = Instance.new("Frame")
+	distRow.Name = "DistRow"
+	distRow.BackgroundTransparency = 1
+	distRow.LayoutOrder = 3
+	distRow.Size = SHOW_DISTANCE and UDim2.new(1, 0, 0, DIST_HEIGHT) or UDim2.new(1, 0, 0, 0)
+	distRow.Parent = frame
+
+	local distText = Instance.new("TextLabel")
+	distText.BackgroundTransparency = 1
+	distText.Size = UDim2.fromScale(1, 1)
+	distText.Font = FONT
+	distText.TextSize = 14
+	distText.TextColor3 = Color3.fromRGB(230, 230, 230)
+	distText.TextStrokeTransparency = 0.35
+	distText.Visible = SHOW_DISTANCE
+	distText.ZIndex = 11
+	distText.Parent = distRow
+
+	return frame, nameRow, nameText, barRow, barFill, hpText, distRow, distText
+end
+
+local function createESPForPlayer(player, character)
+	if player == LocalPlayer then return end
+	cleanupESP(player)
+
+	local humanoid = character:FindFirstChildOfClass("Humanoid") or character:WaitForChild("Humanoid", 5)
+	local root = character:FindFirstChild("HumanoidRootPart") or character:WaitForChild("HumanoidRootPart", 5)
+	if not humanoid or not root then return end
+
+	local highlight = Instance.new("Highlight")
+	highlight.Adornee = character
+	highlight.FillTransparency = 1
+	highlight.OutlineTransparency = 0.3
+	highlight.OutlineColor = Color3.new(1, 1, 1)
+	highlight.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
+	highlight.Parent = character
+
+	local frame, nameRow, nameText, barRow, barFill, hpText, distRow, distText = makeESPFrame()
+
+	ESP[player] = {
+		player = player,
+		character = character,
+		humanoid = humanoid,
+		root = root,
+		highlight = highlight,
+
+		frame = frame,
+		nameRow = nameRow,
+		nameText = nameText,
+		barRow = barRow,
+		barFill = barFill,
+		hpText = hpText,
+		distRow = distRow,
+		distText = distText,
+
+		lastHp = math.floor(humanoid.Health),
+		lastScale = -1,
+		lastTweenTime = 0,
+		connections = {}
+	}
+
+	table.insert(ESP[player].connections, humanoid.Died:Connect(function()
+		cleanupESP(player)
+	end))
+
+	table.insert(ESP[player].connections, character.AncestryChanged:Connect(function(_, parent)
+		if parent == nil then
+			cleanupESP(player)
+		end
+	end))
+end
+
+-- Throttled update loop (interval updates dynamically from settings)
+RunService.Heartbeat:Connect(function(dt)
+	accum += dt
+	if accum < interval then return end
+	accum -= interval
+
+	local localChar = LocalPlayer.Character
+	local localRoot = localChar and localChar:FindFirstChild("HumanoidRootPart")
+	if not localRoot then return end
+
+	for player, d in pairs(ESP) do
+		if (not d.root) or (not d.root.Parent) or (not d.humanoid) then
+			cleanupESP(player)
+		else
+			local dist = (localRoot.Position - d.root.Position).Magnitude
+			local visible = ESP_ENABLED and (dist <= MAX_DISTANCE)
+
+			d.highlight.Enabled = visible
+			d.frame.Visible = visible
+
+			if visible then
+				local worldPos = d.root.Position + Vector3.new(0, 4.0, 0)
+				local v, onScreen = Camera:WorldToViewportPoint(worldPos)
+				if not onScreen then
+					d.frame.Visible = false
+				else
+					local scale = 1 - (dist / SCALE_DISTANCE)
+					scale = math.clamp(scale, MIN_SCALE, MAX_SCALE)
+
+					if d.lastScale < 0 or math.abs(scale - d.lastScale) >= SCALE_EPS then
+						d.lastScale = scale
+
+						local width = math.floor(BASE_WIDTH * scale)
+						local nameH = SHOW_NAMES and math.floor(NAME_HEIGHT * scale) or 0
+						local barH  = SHOW_HEALTH and math.floor(BAR_HEIGHT * scale) or 0
+						local distH = SHOW_DISTANCE and math.floor(DIST_HEIGHT * scale) or 0
+
+						local totalH = nameH + (nameH > 0 and PADDING_Y or 0) + barH + (distH > 0 and PADDING_Y or 0) + distH
+						d.frame.Size = UDim2.fromOffset(width, totalH)
+
+						d.nameRow.Size = SHOW_NAMES and UDim2.new(1, 0, 0, nameH) or UDim2.new(1, 0, 0, 0)
+						d.nameText.Visible = SHOW_NAMES
+
+						d.barRow.Visible = SHOW_HEALTH
+						d.barRow.Size = SHOW_HEALTH and UDim2.new(1, 0, 0, barH) or UDim2.new(1, 0, 0, 0)
+
+						d.distRow.Size = SHOW_DISTANCE and UDim2.new(1, 0, 0, distH) or UDim2.new(1, 0, 0, 0)
+						d.distText.Visible = SHOW_DISTANCE
+
+						d.nameText.TextSize = math.max(10, math.floor(16 * scale))
+						d.hpText.TextSize   = math.max(9,  math.floor(14 * scale))
+						d.distText.TextSize = math.max(9,  math.floor(14 * scale))
+					end
+
+					d.frame.Position = UDim2.fromOffset(v.X, v.Y)
+
+					if SHOW_NAMES then d.nameText.Text = player.Name:upper() end
+					if SHOW_DISTANCE then d.distText.Text = string.format("[%d STUDS]", math.floor(dist)) end
+
+					if SHOW_HEALTH then
+						local hp = math.floor(d.humanoid.Health)
+						local maxHp = math.max(1, math.floor(d.humanoid.MaxHealth))
+						local pct = math.clamp(hp / maxHp, 0, 1)
+
+						d.hpText.Text = string.format("%d / %d (%d%%)", hp, maxHp, math.floor(pct * 100))
+						local col = healthColor(pct)
+						local now = os.clock()
+
+						if hp ~= d.lastHp and (now - d.lastTweenTime) >= TWEEN_COOLDOWN then
+							d.lastHp = hp
+							d.lastTweenTime = now
+							TweenService:Create(
+								d.barFill,
+								TweenInfo.new(TWEEN_TIME, Enum.EasingStyle.Quad, Enum.EasingDirection.Out),
+								{ Size = UDim2.fromScale(pct, 1), BackgroundColor3 = col }
+							):Play()
+						else
+							d.barFill.Size = UDim2.fromScale(pct, 1)
+							d.barFill.BackgroundColor3 = col
+							d.lastHp = hp
+						end
+					end
+				end
+			end
+		end
+	end
+end)
+
+-- Player handling
+local function hookPlayer(player)
+	if player == LocalPlayer then return end
+
+	player.CharacterAdded:Connect(function(char)
+		createESPForPlayer(player, char)
+	end)
+
+	player.CharacterRemoving:Connect(function()
+		cleanupESP(player)
+	end)
+
+	if player.Character then
+		createESPForPlayer(player, player.Character)
+	end
+end
+
+Players.PlayerAdded:Connect(hookPlayer)
+Players.PlayerRemoving:Connect(function(player)
+	cleanupESP(player)
+end)
+
+for _, p in ipairs(Players:GetPlayers()) do
+	hookPlayer(p)
+end
+
+-- RightControl toggles hub visibility
+UserInputService.InputBegan:Connect(function(input, gpe)
+	if gpe then return end
+	if input.KeyCode == Enum.KeyCode.RightControl then
+		outer.Visible = not outer.Visible
+	end
+end)
